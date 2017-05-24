@@ -1,0 +1,93 @@
+#!/bin/bash
+
+[[ -z "$1" ]] && echo "usage: employees <dbname>" && exit 1
+cdb2sql -s $1 -<<'EOF'
+DROP TABLE IF EXISTS dept_emp
+DROP TABLE IF EXISTS dept_manager
+DROP TABLE IF EXISTS titles
+DROP TABLE IF EXISTS salaries
+DROP TABLE IF EXISTS employees
+DROP TABLE IF EXISTS departments
+CREATE TABLE employees {schema {
+    int emp_no
+    datetime birth_date
+    cstring first_name[15]
+    cstring last_name[17]
+    cstring gender[2]
+    datetime hire_date
+}
+keys {
+    "emp_no" = emp_no
+}}$$
+CREATE TABLE departments {schema {
+    cstring dept_no[5]
+    cstring dept_name[41]
+}
+keys {
+    "dept_no" = dept_no
+    "dept_name" = dept_name
+}}$$
+CREATE TABLE dept_manager {schema {
+   int emp_no
+   cstring dept_no[5]
+   datetime from_date
+   datetime to_date
+}
+keys {
+    "primary" = emp_no + dept_no
+    dup "dept_no" = dept_no
+}
+constraints {
+    "primary" -> "employees":"emp_no" on delete cascade
+    "dept_no" -> "departments":"dept_no" on delete cascade
+}}$$
+CREATE TABLE dept_emp {schema {
+    int emp_no
+    cstring dept_no[5]
+    datetime from_date
+    datetime to_date
+}
+keys {
+    "primary" = emp_no + dept_no
+    dup "dept_no" = dept_no
+}
+constraints {
+    "primary" -> "employees":"emp_no" on delete cascade
+    "dept_no" -> "departments":"dept_no" on delete cascade
+}}$$
+CREATE TABLE titles {schema {
+    int emp_no
+    cstring title[51]
+    datetime from_date
+    datetime to_date
+}
+keys {
+    "primary" = emp_no + title + from_date
+}
+constraints {
+    "primary" -> "employees":"emp_no" on delete cascade
+}}$$
+CREATE TABLE salaries {schema {
+    int emp_no
+    int salary
+    datetime from_date
+    datetime to_date
+}
+keys {
+    "primary" = emp_no + from_date
+}
+constraints {
+    "primary" -> "employees":"emp_no" on delete cascade
+}}$$
+EOF
+
+cdb2sql -s $1 -<<EOF
+$(<load_departments.dump)
+$(<load_employees.dump)
+$(<load_dept_emp.dump)
+$(<load_dept_manager.dump)
+$(<load_titles.dump)
+$(<load_salaries1.dump)
+$(<load_salaries2.dump)
+$(<load_salaries3.dump)
+EOF
