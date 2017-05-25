@@ -1,0 +1,201 @@
+#!/bin/bash
+
+[[ -z "$1" ]] && echo "usage: objects <dbname>" && exit 1
+cdb2sql -s $1 -<<'EOF'
+
+
+create procedure emp_dept_id version '1.0' {
+--
+-- returns the department id of a given employee
+--
+local function emp_dept_id(employee_id)
+    local stmt
+    stmt = db:prepare([[
+        select
+            max(from_date) as max_date
+        from
+            dept_emp
+        where emp_no = @employee_id
+        ]])
+    stmt:bind("employee_id", employee_id)
+    local max_date = stmt:fetch().max_date
+    stmt = db:prepare([[
+        select
+            dept_no as dept_no
+        from
+            dept_emp
+        where
+            emp_no = @employee_id
+            and
+            from_date = @max_date
+            limit 1
+            ]])
+    stmt:bind("employee_id", employee_id)
+    stmt:bind("max_date", max_date)
+    return stmt:fetch().dept_no
+end
+local function main(employee_id)
+	return emp_dept_id(employee_id)
+end
+}$$
+put default procedure emp_dept_id '1.0'
+create lua scalar function emp_dept_id
+
+
+create procedure emp_dept_name version '1.0' {
+--
+-- returns the department name of a given employee
+--
+local function emp_dept_name(employee_id)
+	local emp_dept_id = db:sp("emp_dept_id")
+    local stmt = db:prepare([[
+        select
+            dept_name as dept_name
+        from
+            departments
+        where
+            dept_no = @employee_id
+        ]])
+    stmt:bind("employee_id", emp_dept_id(employee_id))
+    return stmt:fetch().dept_name
+end
+}$$
+put default procedure emp_dept_name '1.0'
+create lua scalar function emp_dept_name
+
+
+create procedure emp_name version '1.0' {
+--
+-- returns the employee name of a given employee id
+--
+local function emp_name(employee_id)
+    local stmt = db:prepare([[
+        select
+            first_name || ' ' || last_name as name
+        from
+            employees
+        where
+            emp_no = @employee_id
+        ]])
+    stmt:bind("employee_id", employee_id)
+    return stmt:fetch().name
+end
+local function main(employee_id)
+	return emp_name(employee_id)
+end
+}$$
+put default procedure emp_name '1.0'
+create lua scalar function emp_name
+
+
+create procedure current_manager version '1.0' {
+--
+-- returns the manager of a department
+-- choosing the most recent one
+-- from the manager list
+--
+local function current_manager(dept_id)
+    local stmt = db:prepare([[
+        select
+            max(from_date) as max_date
+        from
+            dept_manager
+        where
+            dept_no = @dept_id
+        ]])
+    stmt:bind("dept_id", dept_id)
+    local max_date = stmt:fetch().max_date
+    stmt = db:prepare([[
+        select
+            emp_no
+        from
+            dept_manager
+        where
+            dept_no = @dept_id
+            and
+            from_date = @max_date
+            limit 1
+        ]])
+    stmt:bind("dept_id", dept_id)
+    stmt:bind("max_date", max_date)
+    local emp_no = stmt:fetch().emp_no
+    local emp_name = db:sp("emp_name")
+    return emp_name(emp_no)
+end
+local function main(dept_id)
+	return current_manager(dept_id)
+end
+}$$
+put default procedure current_manager '1.0'
+create lua scalar function current_manager
+
+
+create procedure show_departments version '1.0' {
+--
+-- shows the departments with the number of employees
+-- per department
+--
+local function main()
+    db:table("department_max_date", {
+        {"emp_no", "int"},
+        {"dept_from_date", "datetime"},
+        {"dept_to_date", "datetime"}})
+    db:exec([[
+        INSERT INTO department_max_date
+        SELECT
+            emp_no, max(from_date), max(to_date)
+        FROM
+            dept_emp
+        GROUP BY
+            emp_no;
+        ]])
+
+    db:table("department_people", {
+        {"emp_no","int"},
+        {"dept_no","text"}})
+    db:exec([[
+        insert into department_people
+        select dmd.emp_no, dept_no
+        from
+            department_max_date dmd
+            inner join dept_emp de
+                on dmd.dept_from_date=de.from_date
+                and dmd.dept_to_date=de.to_date
+                and dmd.emp_no=de.emp_no;
+        ]])
+
+    --
+    -- selects the department list with manager names
+    --
+    local current_manager = db:sp("current_manager");
+    local full_departments = db:table("full_departments", {
+        {"dept_no","text"},
+        {"dept_name","text"},
+        {"manager", "text"}})
+    local stmt = db:exec([[
+        SELECT
+            dept_no, dept_name
+        FROM
+            departments;
+        ]])
+    local row = stmt:fetch()
+    while row do
+        full_departments:insert({
+            dept_no = row.dept_no,
+            dept_name = row.dept_name,
+            manager = current_manager(row.dept_no)})
+        row = stmt:fetch()
+    end
+
+    stmt = db:exec([[
+        SELECT
+            dept_no,dept_name,manager, count(*)
+            from full_departments
+                inner join department_people using (dept_no)
+            group by dept_no;
+        ]])
+    stmt:emit()
+end
+}$$
+put default procedure show_departments '1.0'
+EOF
