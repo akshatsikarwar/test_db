@@ -28,9 +28,7 @@ untouched, and use these issues as data cleaning exercises.
 
 1. Download the repository
 2. Change directory to the repository
-3. run
-
-    ./employees <dbname>
+3. run `./employees <dbname>`
 
 ## DISCLAIMER
 
